@@ -1,0 +1,16 @@
+# Bitcoin Analytics Configuration
+bitcoin:
+  rpc:
+    host: "localhost"
+    port: 8332
+    user: "btcrpc"
+    password: "btcpswd"
+    tls: false
+  
+database:
+  path: "./data/analbtc.db"
+  
+ingestion:
+  start_date: "2023-08-16"  # 1 year ago from today
+  batch_size: 100
+  poll_interval: "30s"
