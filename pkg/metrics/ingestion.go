@@ -193,7 +193,7 @@ func (i *Ingester) ingestBlockTransactions(block *models.Block, txIDs []string) 
 	}
 	
 	for idx, txID := range txIDs {
-		if totalTxs > 10 && (idx+1)%10 == 0 {
+		if totalTxs > 10 && (idx+1)%100 == 0 {
 			log.Printf("Block %d: processed %d/%d transactions", block.Height, idx+1, totalTxs)
 		}
 		
