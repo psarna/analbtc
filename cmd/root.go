@@ -46,13 +46,31 @@ func init() {
 	rootCmd.Flags().StringVarP(&startDate, "from", "f", "", "Start date (YYYY-MM-DD), default: 1 year ago")
 	rootCmd.Flags().StringVarP(&endDate, "to", "t", "", "End date (YYYY-MM-DD), default: today")
 	rootCmd.Flags().IntVarP(&workers, "workers", "w", 10, "Number of concurrent workers")
-
-	rootCmd.MarkFlagRequired("user")
-	rootCmd.MarkFlagRequired("pass")
 }
 
 func runScraper(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+
+	// Check for environment variables if flags weren't provided
+	finalRpcUser := rpcUser
+	finalRpcPass := rpcPass
+	
+	if finalRpcUser == "" {
+		if envUser := os.Getenv("BTC_RPC_USER"); envUser != "" {
+			finalRpcUser = envUser
+		}
+	}
+	
+	if finalRpcPass == "" {
+		if envPass := os.Getenv("BTC_RPC_PASS"); envPass != "" {
+			finalRpcPass = envPass
+		}
+	}
+
+	// Validate that we have both user and pass
+	if finalRpcUser == "" || finalRpcPass == "" {
+		return fmt.Errorf("Bitcoin RPC credentials are required. Provide via --user/--pass flags or BTC_RPC_USER/BTC_RPC_PASS environment variables")
+	}
 
 	database, err := db.NewDB(dbPath)
 	if err != nil {
@@ -60,7 +78,7 @@ func runScraper(cmd *cobra.Command, args []string) error {
 	}
 	defer database.Close()
 
-	rpcClient, err := rpc.NewClient(rpcHost, rpcUser, rpcPass)
+	rpcClient, err := rpc.NewClient(rpcHost, finalRpcUser, finalRpcPass)
 	if err != nil {
 		return fmt.Errorf("failed to create RPC client: %w", err)
 	}
@@ -76,13 +94,35 @@ func runScraper(cmd *cobra.Command, args []string) error {
 
 	workerPool := processor.NewWorkerPool(rpcClient, database, workers)
 	
+	// Start processing in a goroutine
+	processingDone := make(chan error, 1)
 	go func() {
-		if err := workerPool.ProcessBlockRange(ctx, startHeight, endHeight); err != nil {
-			fmt.Fprintf(os.Stderr, "Processing error: %v\n", err)
-		}
+		processingDone <- workerPool.ProcessBlockRange(ctx, startHeight, endHeight)
 	}()
 
-	return ui.RunProgressUI(ctx, startHeight, endHeight, workerPool.GetProgressChannel())
+	// Run UI in a goroutine
+	uiDone := make(chan error, 1)
+	go func() {
+		uiDone <- ui.RunProgressUI(ctx, startHeight, endHeight, workerPool.GetProgressChannel())
+	}()
+
+	// Wait for both processing and UI to complete
+	var processingErr, uiErr error
+	for i := 0; i < 2; i++ {
+		select {
+		case processingErr = <-processingDone:
+			// Processing completed
+		case uiErr = <-uiDone:
+			// UI completed
+		}
+	}
+
+	if processingErr != nil {
+		fmt.Fprintf(os.Stderr, "Processing error: %v\n", processingErr)
+		return processingErr
+	}
+	
+	return uiErr
 }
 
 func calculateHeightRange(rpcClient *rpc.Client) (int64, int64, error) {

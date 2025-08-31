@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
 	"scrapbtc/internal/processor"
 	"time"
 
@@ -134,7 +135,7 @@ func (m ProgressModel) View() string {
 	stats := statsStyle.Render(fmt.Sprintf(
 		"📊 Range: %d - %d | Current: %d\n"+
 		"✅ Processed: %d/%d blocks (%.1f%%)\n"+
-		"📈 Transactions: %,d total | %d in current block\n"+
+		"📈 Transactions: %d total | %d in current block\n"+
 		"⏱️  Elapsed: %s | ETA: %s\n"+
 		"❌ Failed: %d blocks",
 		m.startHeight, m.endHeight, m.currentHeight,
@@ -175,6 +176,11 @@ func (m ProgressModel) renderProgressBar(progress float64) string {
 }
 
 func RunProgressUI(ctx context.Context, startHeight, endHeight int64, progressChan <-chan processor.ProgressUpdate) error {
+	// Check if we have a TTY, if not use simple console output
+	if !isInteractiveTerminal() {
+		return runSimpleProgress(ctx, startHeight, endHeight, progressChan)
+	}
+	
 	model := NewProgressModel(startHeight, endHeight, progressChan)
 	
 	p := tea.NewProgram(model, tea.WithAltScreen())
@@ -186,4 +192,55 @@ func RunProgressUI(ctx context.Context, startHeight, endHeight int64, progressCh
 	
 	_, err := p.Run()
 	return err
+}
+
+func isInteractiveTerminal() bool {
+	// Simple check - if we can't open /dev/tty, we're not interactive
+	file, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	file.Close()
+	return true
+}
+
+func runSimpleProgress(ctx context.Context, startHeight, endHeight int64, progressChan <-chan processor.ProgressUpdate) error {
+	totalBlocks := endHeight - startHeight + 1
+	var processedBlocks, failedBlocks int64
+	var totalTxs int64
+	startTime := time.Now()
+	
+	fmt.Printf("Processing blocks from %d to %d (%d blocks total)\n", startHeight, endHeight, totalBlocks)
+	
+	for {
+		select {
+		case update, ok := <-progressChan:
+			if !ok {
+				elapsed := time.Since(startTime)
+				fmt.Printf("\nProcessing completed!\n")
+				fmt.Printf("Processed: %d blocks\n", processedBlocks)
+				fmt.Printf("Failed: %d blocks\n", failedBlocks)
+				fmt.Printf("Total transactions: %d\n", totalTxs)
+				fmt.Printf("Total time: %s\n", elapsed.Truncate(time.Second))
+				return nil
+			}
+			
+			if update.Error != nil {
+				failedBlocks++
+				fmt.Printf("Error processing block %d: %s\n", update.BlockHeight, update.Error.Error())
+			} else if update.Status == "completed" {
+				processedBlocks++
+				totalTxs += int64(update.TxCount)
+				progress := float64(processedBlocks) / float64(totalBlocks) * 100
+				fmt.Printf("Processed block %d (%d txs) - Progress: %.1f%% (%d/%d)\n", 
+					update.BlockHeight, update.TxCount, progress, processedBlocks, totalBlocks)
+			} else if update.Status == "All blocks already processed" {
+				fmt.Println("All blocks already processed")
+				return nil
+			}
+			
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
