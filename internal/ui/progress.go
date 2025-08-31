@@ -24,6 +24,7 @@ type ProgressModel struct {
 	lastUpdate      time.Time
 	status          string
 	errors          []string
+	debugLogs       []string
 	progressChan    <-chan processor.ProgressUpdate
 	done            bool
 }
@@ -40,6 +41,7 @@ func NewProgressModel(startHeight, endHeight int64, progressChan <-chan processo
 		status:        "Starting...",
 		progressChan:  progressChan,
 		errors:        make([]string, 0),
+		debugLogs:     make([]string, 0),
 	}
 }
 
@@ -70,6 +72,14 @@ func (m ProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ProgressMsg:
 		m.lastUpdate = time.Now()
+		
+		// Handle debug messages
+		if msg.DebugMsg != "" {
+			m.debugLogs = append(m.debugLogs, fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), msg.DebugMsg))
+			if len(m.debugLogs) > 10 {
+				m.debugLogs = m.debugLogs[1:]
+			}
+		}
 		
 		if msg.Error != nil {
 			m.failedBlocks++
@@ -152,8 +162,19 @@ func (m ProgressModel) View() string {
 		}
 	}
 
-	return fmt.Sprintf("%s\n\n%s\n\n%s%s\n\nPress 'q' or Ctrl+C to quit",
-		header, progressBar, stats, errorSection)
+	debugStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("8"))
+
+	var debugSection string
+	if len(m.debugLogs) > 0 {
+		debugSection = "\n\n" + debugStyle.Render("Debug Log:") + "\n"
+		for _, log := range m.debugLogs {
+			debugSection += debugStyle.Render("• " + log) + "\n"
+		}
+	}
+
+	return fmt.Sprintf("%s\n\n%s\n\n%s%s%s\n\nPress 'q' or Ctrl+C to quit",
+		header, progressBar, stats, errorSection, debugSection)
 }
 
 func (m ProgressModel) renderProgressBar(progress float64) string {
@@ -223,6 +244,10 @@ func runSimpleProgress(ctx context.Context, startHeight, endHeight int64, progre
 				fmt.Printf("Total transactions: %d\n", totalTxs)
 				fmt.Printf("Total time: %s\n", elapsed.Truncate(time.Second))
 				return nil
+			}
+			
+			if update.DebugMsg != "" {
+				fmt.Printf("[DEBUG] %s\n", update.DebugMsg)
 			}
 			
 			if update.Error != nil {

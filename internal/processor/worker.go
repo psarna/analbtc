@@ -20,6 +20,7 @@ type ProgressUpdate struct {
 	TxCount     int
 	Status      string
 	Error       error
+	DebugMsg    string
 }
 
 func NewWorkerPool(rpcClient *rpc.Client, database *db.DB, numWorkers int) *WorkerPool {
@@ -99,6 +100,12 @@ func (wp *WorkerPool) worker(ctx context.Context, jobs <-chan int64, wg *sync.Wa
 }
 
 func (wp *WorkerPool) processBlock(ctx context.Context, height int64) error {
+	wp.progress <- ProgressUpdate{
+		BlockHeight: height,
+		Status:      "processing",
+		DebugMsg:    fmt.Sprintf("Starting to process block %d", height),
+	}
+
 	hash, err := wp.rpcClient.GetBlockHashByHeight(height)
 	if err != nil {
 		wp.db.MarkBlockFailed(height, err.Error())
@@ -109,21 +116,15 @@ func (wp *WorkerPool) processBlock(ctx context.Context, height int64) error {
 		return fmt.Errorf("failed to mark block processing: %w", err)
 	}
 
-	block, err := wp.rpcClient.GetBlockByHash(hash)
+	block, transactions, err := wp.rpcClient.GetBlockWithTransactions(hash)
 	if err != nil {
 		wp.db.MarkBlockFailed(height, err.Error())
-		return fmt.Errorf("failed to get block %d: %w", height, err)
+		return fmt.Errorf("failed to get block %d with transactions: %w", height, err)
 	}
 
 	if err := wp.db.InsertBlock(block); err != nil {
 		wp.db.MarkBlockFailed(height, err.Error())
 		return fmt.Errorf("failed to insert block %d: %w", height, err)
-	}
-
-	transactions, err := wp.rpcClient.GetTransactionsByBlock(hash)
-	if err != nil {
-		wp.db.MarkBlockFailed(height, err.Error())
-		return fmt.Errorf("failed to get transactions for block %d: %w", height, err)
 	}
 
 	for _, tx := range transactions {
@@ -141,6 +142,7 @@ func (wp *WorkerPool) processBlock(ctx context.Context, height int64) error {
 		BlockHeight: height,
 		TxCount:     len(transactions),
 		Status:      "completed",
+		DebugMsg:    fmt.Sprintf("Completed block %d with %d transactions", height, len(transactions)),
 	}
 
 	return nil
