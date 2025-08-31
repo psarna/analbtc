@@ -50,7 +50,7 @@ func (db *DB) Close() error {
 }
 
 func (db *DB) InsertBlock(block *models.Block) error {
-	query := `INSERT INTO blocks (
+	query := `INSERT OR IGNORE INTO blocks (
 		hash, height, timestamp, size, weight, tx_count,
 		previous_block_hash, merkle_root, nonce, bits, difficulty, processed_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -64,7 +64,7 @@ func (db *DB) InsertBlock(block *models.Block) error {
 }
 
 func (db *DB) InsertTransaction(tx *models.Transaction) error {
-	query := `INSERT INTO transactions (
+	query := `INSERT OR IGNORE INTO transactions (
 		txid, block_hash, block_height, size, vsize, weight, fee,
 		input_count, output_count, input_value, output_value, timestamp, processed_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -105,8 +105,15 @@ func (db *DB) MarkBlockProcessing(height int64, hash string) error {
 }
 
 func (db *DB) MarkBlockCompleted(height int64) error {
-	query := `UPDATE processing_status SET status = 'completed', completed_at = ? WHERE block_height = ?`
-	_, err := db.conn.Exec(query, time.Now(), height)
+	var blockHash string
+	selectQuery := `SELECT block_hash FROM processing_status WHERE block_height = ? LIMIT 1`
+	err := db.conn.QueryRow(selectQuery, height).Scan(&blockHash)
+	if err != nil {
+		return fmt.Errorf("failed to get block hash for height %d: %w", height, err)
+	}
+	
+	query := `INSERT OR REPLACE INTO processing_status (block_height, block_hash, status, started_at, completed_at) VALUES (?, ?, 'completed', COALESCE((SELECT started_at FROM processing_status WHERE block_height = ?), ?), ?)`
+	_, err = db.conn.Exec(query, height, blockHash, height, time.Now(), time.Now())
 	return err
 }
 
