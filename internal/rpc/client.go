@@ -1,12 +1,11 @@
 package rpc
 
 import (
+	"encoding/json"
 	"fmt"
 	"scrapbtc/pkg/models"
 	"time"
 
-	"github.com/btcsuite/btcd/btcjson"
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
 	"github.com/btcsuite/btcd/rpcclient"
 )
 
@@ -28,6 +27,14 @@ func NewClient(host, user, pass string) (*Client, error) {
 		return nil, fmt.Errorf("failed to create RPC client: %w", err)
 	}
 
+	// Test connection by getting blockchain info
+	info, err := client.GetBlockChainInfo()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to Bitcoin RPC: %w", err)
+	}
+	
+	fmt.Printf("Connected to Bitcoin RPC - Chain: %s, Blocks: %d\n", info.Chain, info.Blocks)
+	
 	return &Client{client: client}, nil
 }
 
@@ -52,37 +59,68 @@ func (c *Client) GetBlockHashByHeight(height int64) (string, error) {
 }
 
 func (c *Client) GetBlockWithTransactions(hash string) (*models.Block, []*models.Transaction, error) {
-	blockHash, err := chainhash.NewHashFromStr(hash)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid block hash %s: %w", hash, err)
+	// Try to get block with full transaction details using a raw JSON-RPC call
+	// This uses verbosity level 2 which should include full transaction details
+	params := []json.RawMessage{
+		json.RawMessage(`"` + hash + `"`),
+		json.RawMessage(`2`),
 	}
-	
-	// Get block with full transaction details (verbosity level 2)
-	blockVerboseTx, err := c.client.GetBlockVerboseTx(blockHash)
+	result, err := c.client.RawRequest("getblock", params)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to get block %s: %w", hash, err)
+		return nil, nil, fmt.Errorf("failed to get block %s with verbosity 2: %w", hash, err)
+	}
+
+	// Parse the result manually since the btcd library doesn't support verbosity=2 properly
+	var blockData struct {
+		Hash              string  `json:"hash"`
+		Height            int64   `json:"height"`
+		Time              int64   `json:"time"`
+		Size              int32   `json:"size"`
+		Weight            int32   `json:"weight"`
+		PreviousBlockHash string  `json:"previousblockhash"`
+		MerkleRoot        string  `json:"merkleroot"`
+		Nonce             uint32  `json:"nonce"`
+		Bits              string  `json:"bits"`
+		Difficulty        float64 `json:"difficulty"`
+		Tx                []struct {
+			Txid     string `json:"txid"`
+			Size     int32  `json:"size"`
+			VSize    int32  `json:"vsize"`
+			Weight   int32  `json:"weight"`
+			Vin      []struct {
+				Txid string `json:"txid"`
+				Vout uint32 `json:"vout"`
+			} `json:"vin"`
+			Vout []struct {
+				Value float64 `json:"value"`
+			} `json:"vout"`
+		} `json:"tx"`
+	}
+
+	if err := json.Unmarshal(result, &blockData); err != nil {
+		return nil, nil, fmt.Errorf("failed to unmarshal block data: %w", err)
 	}
 
 	block := &models.Block{
-		Hash:              blockVerboseTx.Hash,
-		Height:            blockVerboseTx.Height,
-		Timestamp:         time.Unix(blockVerboseTx.Time, 0),
-		Size:              blockVerboseTx.Size,
-		Weight:            blockVerboseTx.Weight,
-		TxCount:           len(blockVerboseTx.RawTx),
-		PreviousBlockHash: blockVerboseTx.PreviousHash,
-		MerkleRoot:        blockVerboseTx.MerkleRoot,
-		Nonce:             blockVerboseTx.Nonce,
-		Bits:              blockVerboseTx.Bits,
-		Difficulty:        blockVerboseTx.Difficulty,
+		Hash:              blockData.Hash,
+		Height:            blockData.Height,
+		Timestamp:         time.Unix(blockData.Time, 0),
+		Size:              blockData.Size,
+		Weight:            blockData.Weight,
+		TxCount:           len(blockData.Tx),
+		PreviousBlockHash: blockData.PreviousBlockHash,
+		MerkleRoot:        blockData.MerkleRoot,
+		Nonce:             blockData.Nonce,
+		Bits:              blockData.Bits,
+		Difficulty:        blockData.Difficulty,
 		ProcessedAt:       time.Now(),
 	}
 
 	var transactions []*models.Transaction
-	blockTime := time.Unix(blockVerboseTx.Time, 0)
+	blockTime := time.Unix(blockData.Time, 0)
 	processedAt := time.Now()
 
-	for _, rawTx := range blockVerboseTx.RawTx {
+	for _, rawTx := range blockData.Tx {
 		inputValue := int64(0)
 		outputValue := int64(0)
 		fee := int64(0)
@@ -91,24 +129,22 @@ func (c *Client) GetBlockWithTransactions(hash string) (*models.Block, []*models
 			outputValue += int64(vout.Value * 100000000)
 		}
 
-		if !isCoinbase(&rawTx) {
-			for _, vin := range rawTx.Vin {
-				if vin.Txid != "" {
-					// For now, skip input value calculation to avoid additional RPC calls
-					// This would require the previous transaction data
-					// inputValue += getPrevOutputValue(vin.Txid, vin.Vout)
-				}
-			}
+		// Check if it's coinbase transaction
+		isCoinbaseTx := len(rawTx.Vin) == 1 && rawTx.Vin[0].Txid == ""
+		
+		if !isCoinbaseTx {
+			// For now, skip input value calculation to avoid additional RPC calls
+			// This would require the previous transaction data
 			fee = inputValue - outputValue // Will be 0 for now
 		}
 
 		tx := &models.Transaction{
 			Txid:        rawTx.Txid,
 			BlockHash:   hash,
-			BlockHeight: blockVerboseTx.Height,
-			Size:        int32(rawTx.Size),
-			VSize:       int32(rawTx.Vsize),
-			Weight:      int32(rawTx.Weight),
+			BlockHeight: blockData.Height,
+			Size:        rawTx.Size,
+			VSize:       rawTx.VSize,
+			Weight:      rawTx.Weight,
 			Fee:         fee,
 			InputCount:  len(rawTx.Vin),
 			OutputCount: len(rawTx.Vout),
@@ -119,6 +155,8 @@ func (c *Client) GetBlockWithTransactions(hash string) (*models.Block, []*models
 		}
 
 		transactions = append(transactions, tx)
+		
+		// Progress feedback is now handled by the processor layer
 	}
 
 	return block, transactions, nil
@@ -128,8 +166,4 @@ func (c *Client) GetBlockWithTransactions(hash string) (*models.Block, []*models
 func (c *Client) GetTransactionsByBlock(blockHash string) ([]*models.Transaction, error) {
 	_, transactions, err := c.GetBlockWithTransactions(blockHash)
 	return transactions, err
-}
-
-func isCoinbase(tx *btcjson.TxRawResult) bool {
-	return len(tx.Vin) == 1 && tx.Vin[0].Txid == ""
 }

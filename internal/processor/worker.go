@@ -133,12 +133,23 @@ func (wp *WorkerPool) processBlock(ctx context.Context, height int64) error {
 			return fmt.Errorf("failed to insert transaction %s: %w", tx.Txid, err)
 		}
 		
+		// Progress feedback every 100 transactions for UI updates, and every 1000 for debug log
 		if (i+1)%100 == 0 || i == len(transactions)-1 {
 			wp.progress <- ProgressUpdate{
 				BlockHeight: height,
 				TxCount:     i + 1,
 				Status:      "processing_transactions",
 				DebugMsg:    fmt.Sprintf("Block %d: processed %d/%d transactions", height, i+1, len(transactions)),
+			}
+		}
+		
+		// Detailed debug feedback every 1000 transactions (moved from RPC layer)
+		if (i+1)%1000 == 0 {
+			wp.progress <- ProgressUpdate{
+				BlockHeight: height,
+				TxCount:     i + 1,
+				Status:      "processing_transactions",
+				DebugMsg:    fmt.Sprintf("Processed %d/%d transactions for block %d", i+1, len(transactions), height),
 			}
 		}
 	}

@@ -30,6 +30,7 @@ type ProgressModel struct {
 }
 
 type ProgressMsg processor.ProgressUpdate
+type tickMsg struct{}
 
 func NewProgressModel(startHeight, endHeight int64, progressChan <-chan processor.ProgressUpdate) ProgressModel {
 	return ProgressModel{
@@ -58,7 +59,8 @@ func (m *ProgressModel) waitForActivity() tea.Cmd {
 			}
 			return ProgressMsg(update)
 		case <-time.After(100 * time.Millisecond):
-			return nil
+			// Return a custom tick message to keep the UI updating
+			return tickMsg{}
 		}
 	}
 }
@@ -69,6 +71,10 @@ func (m ProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
 			return m, tea.Quit
 		}
+
+	case tickMsg:
+		// Just continue waiting for activity
+		return m, m.waitForActivity()
 
 	case ProgressMsg:
 		m.lastUpdate = time.Now()
@@ -215,11 +221,27 @@ func RunProgressUI(ctx context.Context, startHeight, endHeight int64, progressCh
 	}()
 	
 	_, err := p.Run()
+	
+	// If TUI failed, fall back to simple progress
+	if err != nil {
+		return runSimpleProgress(ctx, startHeight, endHeight, progressChan)
+	}
+	
 	return err
 }
 
 func isInteractiveTerminal() bool {
-	// Simple check - if we can't open /dev/tty, we're not interactive
+	// Check environment variable to force TUI mode
+	if os.Getenv("FORCE_TUI") != "" {
+		return true
+	}
+	
+	// Check if stdin is connected to a terminal
+	if fileInfo, _ := os.Stdin.Stat(); (fileInfo.Mode() & os.ModeCharDevice) == 0 {
+		return false
+	}
+	
+	// Check if we can open /dev/tty
 	file, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return false
