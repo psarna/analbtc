@@ -127,10 +127,19 @@ func (wp *WorkerPool) processBlock(ctx context.Context, height int64) error {
 		return fmt.Errorf("failed to insert block %d: %w", height, err)
 	}
 
-	for _, tx := range transactions {
+	for i, tx := range transactions {
 		if err := wp.db.InsertTransaction(tx); err != nil {
 			wp.db.MarkBlockFailed(height, err.Error())
 			return fmt.Errorf("failed to insert transaction %s: %w", tx.Txid, err)
+		}
+		
+		if (i+1)%100 == 0 || i == len(transactions)-1 {
+			wp.progress <- ProgressUpdate{
+				BlockHeight: height,
+				TxCount:     i + 1,
+				Status:      "processing_transactions",
+				DebugMsg:    fmt.Sprintf("Block %d: processed %d/%d transactions", height, i+1, len(transactions)),
+			}
 		}
 	}
 

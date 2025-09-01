@@ -92,6 +92,9 @@ func (m ProgressModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.totalTxs += int64(msg.TxCount)
 			m.currentHeight = msg.BlockHeight
 			m.currentBlockTxs = msg.TxCount
+		} else if msg.Status == "processing_transactions" {
+			m.currentHeight = msg.BlockHeight
+			m.currentBlockTxs = msg.TxCount
 		}
 
 		if msg.Status == "All blocks already processed" {
@@ -257,8 +260,11 @@ func runSimpleProgress(ctx context.Context, startHeight, endHeight int64, progre
 				processedBlocks++
 				totalTxs += int64(update.TxCount)
 				progress := float64(processedBlocks) / float64(totalBlocks) * 100
-				fmt.Printf("Processed block %d (%d txs) - Progress: %.1f%% (%d/%d)\n", 
+				fmt.Printf("✅ Completed block %d (%d txs) - Progress: %.1f%% (%d/%d)\n", 
 					update.BlockHeight, update.TxCount, progress, processedBlocks, totalBlocks)
+			} else if update.Status == "processing_transactions" {
+				fmt.Printf("🔄 Processing block %d: %d transactions processed\n", 
+					update.BlockHeight, update.TxCount)
 			} else if update.Status == "All blocks already processed" {
 				fmt.Println("All blocks already processed")
 				return nil
