@@ -127,30 +127,24 @@ func (wp *WorkerPool) processBlock(ctx context.Context, height int64) error {
 		return fmt.Errorf("failed to insert block %d: %w", height, err)
 	}
 
-	for i, tx := range transactions {
-		if err := wp.db.InsertTransaction(tx); err != nil {
+	const batchSize = 1000
+	for i := 0; i < len(transactions); i += batchSize {
+		end := i + batchSize
+		if end > len(transactions) {
+			end = len(transactions)
+		}
+		
+		batch := transactions[i:end]
+		if err := wp.db.InsertTransactionsBatch(batch); err != nil {
 			wp.db.MarkBlockFailed(height, err.Error())
-			return fmt.Errorf("failed to insert transaction %s: %w", tx.Txid, err)
+			return fmt.Errorf("failed to insert transaction batch: %w", err)
 		}
 		
-		// Progress feedback every 100 transactions for UI updates, and every 1000 for debug log
-		if (i+1)%100 == 0 || i == len(transactions)-1 {
-			wp.progress <- ProgressUpdate{
-				BlockHeight: height,
-				TxCount:     i + 1,
-				Status:      "processing_transactions",
-				DebugMsg:    fmt.Sprintf("Block %d: processed %d/%d transactions", height, i+1, len(transactions)),
-			}
-		}
-		
-		// Detailed debug feedback every 1000 transactions (moved from RPC layer)
-		if (i+1)%1000 == 0 {
-			wp.progress <- ProgressUpdate{
-				BlockHeight: height,
-				TxCount:     i + 1,
-				Status:      "processing_transactions",
-				DebugMsg:    fmt.Sprintf("Processed %d/%d transactions for block %d", i+1, len(transactions), height),
-			}
+		wp.progress <- ProgressUpdate{
+			BlockHeight: height,
+			TxCount:     end,
+			Status:      "processing_transactions",
+			DebugMsg:    fmt.Sprintf("Block %d: processed %d/%d transactions", height, end, len(transactions)),
 		}
 	}
 

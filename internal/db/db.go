@@ -77,6 +77,39 @@ func (db *DB) InsertTransaction(tx *models.Transaction) error {
 	return err
 }
 
+func (db *DB) InsertTransactionsBatch(transactions []*models.Transaction) error {
+	if len(transactions) == 0 {
+		return nil
+	}
+
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO transactions (
+		txid, block_hash, block_height, size, vsize, weight, fee,
+		input_count, output_count, input_value, output_value, timestamp, processed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, txn := range transactions {
+		_, err := stmt.Exec(
+			txn.Txid, txn.BlockHash, txn.BlockHeight, txn.Size, txn.VSize, txn.Weight,
+			txn.Fee, txn.InputCount, txn.OutputCount, txn.InputValue, txn.OutputValue,
+			txn.Timestamp, txn.ProcessedAt)
+		if err != nil {
+			return fmt.Errorf("failed to insert transaction %s: %w", txn.Txid, err)
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (db *DB) GetProcessedBlocks(fromHeight, toHeight int64) (map[int64]bool, error) {
 	query := `SELECT block_height FROM processing_status WHERE status = 'completed' AND block_height BETWEEN ? AND ?`
 	
@@ -134,4 +167,17 @@ func (db *DB) GetMaxProcessedHeight() (int64, error) {
 		return maxHeight.Int64, nil
 	}
 	return 0, nil
+}
+
+func (db *DB) CreateIndexes() error {
+	if _, err := db.conn.Exec(CreateAllIndexes); err != nil {
+		return fmt.Errorf("failed to create indexes: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) EnableFastInserts() error {
+	// DuckDB doesn't support SQLite-specific PRAGMA statements
+	// DuckDB is already optimized for fast inserts by default
+	return nil
 }

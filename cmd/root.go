@@ -78,6 +78,10 @@ func runScraper(cmd *cobra.Command, args []string) error {
 	}
 	defer database.Close()
 
+	if err := database.EnableFastInserts(); err != nil {
+		return fmt.Errorf("failed to enable fast inserts: %w", err)
+	}
+
 	rpcClient, err := rpc.NewClient(rpcHost, finalRpcUser, finalRpcPass)
 	if err != nil {
 		return fmt.Errorf("failed to create RPC client: %w", err)
@@ -120,6 +124,13 @@ func runScraper(cmd *cobra.Command, args []string) error {
 	if processingErr != nil {
 		fmt.Fprintf(os.Stderr, "Processing error: %v\n", processingErr)
 		return processingErr
+	}
+
+	fmt.Println("Creating indexes for optimal query performance...")
+	if err := database.CreateIndexes(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to create indexes: %v\n", err)
+	} else {
+		fmt.Println("Indexes created successfully.")
 	}
 	
 	return uiErr

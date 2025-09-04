@@ -15,7 +15,9 @@ const (
 		bits VARCHAR NOT NULL,
 		difficulty DOUBLE NOT NULL,
 		processed_at TIMESTAMP NOT NULL
-	);
+	);`
+
+	CreateBlocksIndexes = `
 	CREATE INDEX IF NOT EXISTS idx_blocks_height ON blocks(height);
 	CREATE INDEX IF NOT EXISTS idx_blocks_timestamp ON blocks(timestamp);
 	`
@@ -35,7 +37,9 @@ const (
 		output_value BIGINT NOT NULL,
 		timestamp TIMESTAMP NOT NULL,
 		processed_at TIMESTAMP NOT NULL
-	);
+	);`
+
+	CreateTransactionsIndexes = `
 	CREATE INDEX IF NOT EXISTS idx_transactions_block_hash ON transactions(block_hash);
 	CREATE INDEX IF NOT EXISTS idx_transactions_block_height ON transactions(block_height);
 	CREATE INDEX IF NOT EXISTS idx_transactions_timestamp ON transactions(timestamp);
@@ -53,7 +57,9 @@ const (
 		value BIGINT,
 		address VARCHAR,
 		txid_spending VARCHAR NOT NULL
-	);
+	);`
+
+	CreateTxInputsIndexes = `
 	CREATE INDEX IF NOT EXISTS idx_tx_inputs_txid ON tx_inputs(txid_spending);
 	CREATE INDEX IF NOT EXISTS idx_tx_inputs_prev ON tx_inputs(prev_txid, prev_vout);
 	`
@@ -68,7 +74,9 @@ const (
 		address VARCHAR,
 		spent_txid VARCHAR,
 		spent_vout INTEGER
-	);
+	);`
+
+	CreateTxOutputsIndexes = `
 	CREATE INDEX IF NOT EXISTS idx_tx_outputs_txid ON tx_outputs(txid);
 	CREATE INDEX IF NOT EXISTS idx_tx_outputs_address ON tx_outputs(address);
 	CREATE INDEX IF NOT EXISTS idx_tx_outputs_spent ON tx_outputs(spent_txid, spent_vout);
@@ -82,7 +90,16 @@ const (
 		started_at TIMESTAMP NOT NULL,
 		completed_at TIMESTAMP,
 		error_message VARCHAR
-	);
+	);`
+
+	CreateProcessingStatusIndexes = `
 	CREATE INDEX IF NOT EXISTS idx_processing_status_status ON processing_status(status);
 	`
+
+	CreateAllIndexes = `
+	` + CreateBlocksIndexes + `
+	` + CreateTransactionsIndexes + `
+	` + CreateTxInputsIndexes + `
+	` + CreateTxOutputsIndexes + `
+	` + CreateProcessingStatusIndexes
 )
