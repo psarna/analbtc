@@ -127,11 +127,13 @@ func (wp *WorkerPool) processBlock(ctx context.Context, height int64) error {
 		return fmt.Errorf("failed to insert block %d: %w", height, err)
 	}
 
-	const batchSize = 1000
-	for i := 0; i < len(transactions); i += batchSize {
+	const batchSize = 500  // Reduced batch size for lower memory usage
+	totalTxs := len(transactions)
+	
+	for i := 0; i < totalTxs; i += batchSize {
 		end := i + batchSize
-		if end > len(transactions) {
-			end = len(transactions)
+		if end > totalTxs {
+			end = totalTxs
 		}
 		
 		batch := transactions[i:end]
@@ -140,13 +142,21 @@ func (wp *WorkerPool) processBlock(ctx context.Context, height int64) error {
 			return fmt.Errorf("failed to insert transaction batch: %w", err)
 		}
 		
+		// Clear processed transactions to free memory
+		for j := i; j < end; j++ {
+			transactions[j] = nil
+		}
+		
 		wp.progress <- ProgressUpdate{
 			BlockHeight: height,
 			TxCount:     end,
 			Status:      "processing_transactions",
-			DebugMsg:    fmt.Sprintf("Block %d: processed %d/%d transactions", height, end, len(transactions)),
+			DebugMsg:    fmt.Sprintf("Block %d: processed %d/%d transactions", height, end, totalTxs),
 		}
 	}
+	
+	// Clear transaction slice to free memory
+	transactions = nil
 
 	if err := wp.db.MarkBlockCompleted(height); err != nil {
 		return fmt.Errorf("failed to mark block completed: %w", err)

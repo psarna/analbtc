@@ -96,10 +96,26 @@ const (
 	CREATE INDEX IF NOT EXISTS idx_processing_status_status ON processing_status(status);
 	`
 
+	CreatePriceDataTable = `
+	CREATE TABLE IF NOT EXISTS price_data (
+		timestamp TIMESTAMP PRIMARY KEY,
+		price DOUBLE NOT NULL,
+		market_cap BIGINT,
+		volume_24h BIGINT,
+		source VARCHAR NOT NULL,
+		fetched_at TIMESTAMP NOT NULL
+	);`
+
+	CreatePriceDataIndexes = `
+	CREATE INDEX IF NOT EXISTS idx_price_data_timestamp ON price_data(timestamp);
+	CREATE INDEX IF NOT EXISTS idx_price_data_source ON price_data(source);
+	`
+
 	CreateAllIndexes = `
 	` + CreateBlocksIndexes + `
 	` + CreateTransactionsIndexes + `
 	` + CreateTxInputsIndexes + `
 	` + CreateTxOutputsIndexes + `
-	` + CreateProcessingStatusIndexes
+	` + CreateProcessingStatusIndexes + `
+	` + CreatePriceDataIndexes
 )

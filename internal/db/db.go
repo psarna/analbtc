@@ -34,6 +34,7 @@ func (db *DB) createTables() error {
 		CreateTxInputsTable,
 		CreateTxOutputsTable,
 		CreateProcessingStatusTable,
+		CreatePriceDataTable,
 	}
 
 	for _, query := range queries {
@@ -180,4 +181,47 @@ func (db *DB) EnableFastInserts() error {
 	// DuckDB doesn't support SQLite-specific PRAGMA statements
 	// DuckDB is already optimized for fast inserts by default
 	return nil
+}
+
+func (db *DB) InsertPriceData(priceData *models.PriceData) error {
+	query := `INSERT OR REPLACE INTO price_data (
+		timestamp, price, market_cap, volume_24h, source, fetched_at
+	) VALUES (?, ?, ?, ?, ?, ?)`
+
+	_, err := db.conn.Exec(query,
+		priceData.Timestamp, priceData.Price, priceData.MarketCap,
+		priceData.Volume24h, priceData.Source, priceData.FetchedAt)
+
+	return err
+}
+
+func (db *DB) InsertPriceDataBatch(priceDataSlice []*models.PriceData) error {
+	if len(priceDataSlice) == 0 {
+		return nil
+	}
+
+	tx, err := db.conn.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO price_data (
+		timestamp, price, market_cap, volume_24h, source, fetched_at
+	) VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	for _, data := range priceDataSlice {
+		_, err := stmt.Exec(
+			data.Timestamp, data.Price, data.MarketCap,
+			data.Volume24h, data.Source, data.FetchedAt)
+		if err != nil {
+			return fmt.Errorf("failed to insert price data: %w", err)
+		}
+	}
+
+	return tx.Commit()
 }

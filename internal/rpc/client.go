@@ -116,10 +116,12 @@ func (c *Client) GetBlockWithTransactions(hash string) (*models.Block, []*models
 		ProcessedAt:       time.Now(),
 	}
 
-	var transactions []*models.Transaction
 	blockTime := time.Unix(blockData.Time, 0)
 	processedAt := time.Now()
 
+	// Stream transactions to avoid holding all in memory
+	transactions := make([]*models.Transaction, 0, len(blockData.Tx))
+	
 	for _, rawTx := range blockData.Tx {
 		inputValue := int64(0)
 		outputValue := int64(0)

@@ -54,3 +54,12 @@ type TxOutput struct {
 	SpentTxid    string `json:"spent_txid"`
 	SpentVout    uint32 `json:"spent_vout"`
 }
+
+type PriceData struct {
+	Timestamp  time.Time `json:"timestamp"`
+	Price      float64   `json:"price"`
+	MarketCap  int64     `json:"market_cap"`
+	Volume24h  int64     `json:"volume_24h"`
+	Source     string    `json:"source"`
+	FetchedAt  time.Time `json:"fetched_at"`
+}
